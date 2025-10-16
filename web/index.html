@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Microplastics & Chronic Disease — County Explorer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+
+  <!-- Leaflet (CDN) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <style>
+    #map { position: relative; z-index: 1; }          /* map sits below */
+    .legend { position:absolute; z-index: 999; }      /* legend floats above */
+    .legend { pointer-events: none; }
+    :root{ --bg:#0b0d10; --panel:#12161b; --muted:#7a8794; --text:#e6eef6; --accent:#36b3c9;
+           --good:#41c97a; --warn:#f2a900; --bad:#ef4444; --line:#1e2732; }
+    *{box-sizing:border-box} html,body{height:100%;margin:0;background:var(--bg);color:var(--text);
+      font:14px/1.45 system-ui,Segoe UI,Roboto,Arial,sans-serif}
+    header{padding:14px 18px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0c1217,#0a0e12)}
+    header h1{margin:0;font-size:18px;letter-spacing:.2px}
+    header p{margin:4px 0 0;color:var(--muted)}
+    .wrap{display:grid;grid-template-columns:320px 1fr;gap:10px;height:calc(100% - 72px);padding:10px}
+    @media(max-width:900px){.wrap{grid-template-columns:1fr;height:auto;grid-auto-rows:minmax(320px,auto)}}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;overflow:auto}
+    #map{height:100%;border-radius:12px}
+    .controls{display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:8px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    input[type="text"], select, button{
+      background:#0e1318;border:1px solid #263040;border-radius:10px;color:var(--text);padding:8px 10px
+    }
+    button{cursor:pointer}
+    .pill{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid #2a3646;color:var(--muted);font-size:12px}
+    .kpi{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .card{background:#0e1318;border:1px solid #263040;border-radius:10px;padding:10px}
+    .card h4{margin:0 0 6px;font-size:12px;color:var(--muted);font-weight:600}
+    .card .big{font-size:18px;font-weight:700}
+    .legend{position:absolute;bottom:12px;right:12px;background:#0e1318;border:1px solid #263040;border-radius:10px;padding:8px;color:var(--text);font-size:12px}
+    .legend .box{display:flex;align-items:center;gap:6px;margin:4px 0}
+    .legend .sw{width:16px;height:12px;border-radius:3px;border:1px solid #2a3646}
+    .muted{color:var(--muted)}
+    a{color:var(--accent);text-decoration:none}
+    .footer{margin-top:10px;color:var(--muted);font-size:12px}
+    .badge{display:inline-block;padding:2px 6px;border-radius:6px;font-size:11px;border:1px solid #2a3646}
+    .badge.good{border-color:#1f5136;color:#86efac}
+    .badge.warn{border-color:#5b4915;color:#fde68a}
+    .badge.bad{border-color:#5a1f1f;color:#fecaca}
+    .chips{display:flex;gap:6px;flex-wrap:wrap}
+    .chip{font-size:11px;border:1px solid #2a3646;border-radius:999px;padding:2px 8px;color:var(--muted)}
+  </style>
+</head>
+<body>
+<header>
+  <h1>Microplastics & Chronic Disease — County Explorer</h1>
+  <p>Predicted microplastic exposure aligns with urbanization and advantage; county-level disease patterns reflect geography and inequality. Explore the map or look up your county. <span class="muted">Ecological ≠ individual risk.</span></p>
+</header>
+
+<div class="wrap">
+  <!-- Left panel -->
+  <aside class="panel" id="left">
+    <div class="controls">
+      <div class="row">
+        <input id="searchBox" type="text" placeholder="Search county name or FIPS…"/>
+      </div>
+      <div class="row">
+        <select id="layerSelect" title="Layer" style="flex:1">
+          <option value="pred_tif">Predicted microplastics</option>
+          <option value="socioecon_index">SES index (z)</option>
+          <option value="alz_mean_rate">Alzheimer’s mortality</option>
+          <option value="chd_pct">CHD prevalence %</option>
+          <option value="diabetes_pct">Diabetes %</option>
+          <option value="asthma_pct">Asthma %</option>
+        </select>
+        <button id="resetView">Reset view</button>
+      </div>
+      <div class="row" style="align-items:center">
+        <label><input type="checkbox" id="fadeLow"/> Fade low-confidence</label>
+        <label><input type="checkbox" id="showOutlines" checked/> Confidence outlines</label>
+      </div>
+      <div class="chips">
+        <span class="chip">Scope: U.S. counties</span>
+        <span class="chip">Unit: ecological</span>
+        <span class="chip">Key caveat: not causal</span>
+      </div>
+    </div>
+
+    <div id="detail">
+      <div class="pill">Start by clicking a county or searching above</div>
+      <div class="footer">
+        <p class="muted">Confidence flags: <b>OOR</b> (out-of-range inputs), <b>wide</b> (wide prediction intervals). Low-confidence areas are provisional. See <a href="#methods">Methods</a>.</p>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Map -->
+  <main class="panel" style="position:relative">
+    <div id="map"></div>
+    <div class="legend" id="legend"></div>
+  </main>
+</div>
+
+<!-- Findings / Methods -->
+<section class="panel" id="story" style="margin:10px">
+  <h3 style="margin:0 0 6px">Findings in Brief</h3>
+  <ul>
+    <li>Across counties, higher predicted microplastic exposure correlates <i>negatively</i> with Alzheimer’s, CHD, diabetes, and asthma in bivariate models.</li>
+    <li>After socioeconomic controls, effects attenuate; Alzheimer’s & CHD remain modestly negative. Interpretation: urbanization, age, and access dominate patterns.</li>
+    <li><b>Not proof of safety:</b> these are ecological correlations that reflect inequality.</li>
+  </ul>
+</section>
+
+<section class="panel" id="methods" style="margin:10px">
+  <h3 style="margin:0 0 6px">Methods & Caveats</h3>
+  <p class="muted">
+    Exposure values are <b>predicted</b> from wastewater design flow, treated population, treatment score, distance to coast (and imperviousness when available). We trained on counties with raster microplastic measurements and applied the model nationally. Flags: out-of-range predictors (OOR) and wide prediction intervals. County-level associations ≠ individual risk; spatial confounding is likely.
+  </p>
+  <div class="footer">
+    <span>Data: CDC PLACES (2024), CDC WONDER (1999–2020), ACS.</span>
+    <span style="float:right"><a id="citationsLink" href="#" target="_blank" rel="noreferrer">Full APA citations (QR)</a></span>
+  </div>
+</section>
+
+<script>
+/* ----------------- Config ----------------- */
+const ASSETS = "assets";
+const META_URL = `${ASSETS}/county_meta.json`;
+const STATS_URL = `${ASSETS}/stats.json`;
+const MANIFEST_URL = `${ASSETS}/manifest.json`;
+const NATIONAL_URL = `${ASSETS}/geo/counties_conus_simplified.geojson`; // fallback
+const CITATIONS_URL = ""; // optional link to your APA doc
+
+/* Field metadata for labels/formatting/units */
+const FIELD_META = {
+  pred_tif:{label:"Predicted microplastics (µg/L eq.)", fmt:"num3"},
+  pred_tif_lo:{label:"PI lower", fmt:"num3"},
+  pred_tif_hi:{label:"PI upper", fmt:"num3"},
+  y_pi_w:{label:"PI width", fmt:"num3"},
+  socioecon_index:{label:"SES index (z)", fmt:"num2"},
+  alz_mean_rate:{label:"Alzheimer’s mortality (per 100k)", fmt:"num1"},
+  chd_pct:{label:"CHD prevalence (%)", fmt:"pct1"},
+  diabetes_pct:{label:"Diabetes (%)", fmt:"pct1"},
+  asthma_pct:{label:"Asthma (%)", fmt:"pct1"},
+  poverty_pct:{label:"Poverty (%)", fmt:"pct1"},
+  lt_hs_25plus_pct:{label:"≤HS, age 25+ (%)", fmt:"pct1"},
+  unemp_rate_pct:{label:"Unemployment (%)", fmt:"pct1"},
+  design_flow_mgd_sum:{label:"Design flow (MGD)", fmt:"num2"},
+  treatment_score_mean:{label:"Treatment score (1–3)", fmt:"num1"},
+  net_treated_pop_2022_sum:{label:"Treated pop (2022)", fmt:"int"},
+  dist_km:{label:"Distance to coast (km)", fmt:"num1"}
+};
+
+/* ----------------- Globals ----------------- */
+let META=null, STATS=null, MANIFEST=null;
+let map, layersGroup = L.layerGroup();
+let currentLayerKey = "pred_tif";
+let featureIndex = new Map();
+let FADE_LOW = false;
+let SHOW_OUTLINES = true;
+
+/* ----------------- Small on-screen logger ----------------- */
+function uiNotice(msg){
+  let n = document.getElementById("uiNotice");
+  if(!n){
+    n = document.createElement("div");
+    n.id = "uiNotice";
+    n.style.cssText = "position:absolute;top:10px;right:10px;z-index:9999;background:#201b1b;color:#f7d7d7;border:1px solid #563; padding:8px 10px;border-radius:8px;max-width:360px;font:12px/1.3 system-ui";
+    document.body.appendChild(n);
+  }
+  n.innerHTML = msg;
+}
+
+/* ----------------- Utils ----------------- */
+function fmtBy(key, val){
+  const fm = (FIELD_META[key]||{}).fmt || "num3";
+  if(val==null || Number.isNaN(val)) return "N/A";
+  if(fm==="int")  return Math.round(val).toLocaleString();
+  if(fm==="pct1") return (typeof val==="number"? val.toFixed(1): val)+"%";
+  if(fm==="num1") return (typeof val==="number"? val.toFixed(1): val);
+  if(fm==="num2") return (typeof val==="number"? val.toFixed(2): val);
+  return (typeof val==="number"? (Math.abs(val)>=100? val.toFixed(1): val.toFixed(3)) : val);
+}
+function labelFor(key){ return (FIELD_META[key] && FIELD_META[key].label) || key; }
+
+/* ----------------- Map init ----------------- */
+function initMap(){
+  map = L.map('map', {minZoom:3, maxZoom:12, preferCanvas:true, attributionControl:false})
+        .setView([37.5,-96.5], 4);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+              { subdomains: 'abcd' }).addTo(map);
+  layersGroup.addTo(map);
+  document.getElementById('resetView').onclick = ()=> map.setView([37.5,-96.5], 4);
+}
+
+// Palettes per layer (muted but distinct)
+const COLOR_RAMPS = {
+  pred_tif:        ["#0b2e3b","#104455","#155c70","#1c7a8f","#24a0b4","#2ac6d6"],  // teal
+  socioecon_index: ["#2e1743","#3e2360","#4e2e7d","#5c3f95","#6a56a7","#7a6bb8"],  // purple
+  alz_mean_rate:   ["#3a0d0d","#5a1b1b","#7a2b2b","#a03c3c","#c05151","#de6a6a"],  // red
+  chd_pct:         ["#3a2a0d","#5a4015","#7a561f","#9b6d2a","#bb8737","#d7a44a"],  // amber
+  diabetes_pct:    ["#0d3a1c","#165a2c","#1f7a3c","#2a9b4e","#37bb60","#4ad775"],  // green
+  asthma_pct:      ["#0d2f3a","#154559","#1e5b77","#287497","#3190b7","#3cadd8"],  // blue
+  default:         ["#0e3b46","#105766","#127485","#1997a7","#27b9c4","#36d3db"]   // fallback teal
+};
+
+function makeQuantileScale(values, steps=6, key="default"){
+  const v = values.filter(x => x!=null && !Number.isNaN(x)).sort((a,b)=>a-b);
+  if(v.length===0){ return {stops:[0], colors:["#444"]}; }
+  const stops = [];
+  for(let i=0;i<steps;i++){
+    const q = i/(steps-1);
+    const idx = Math.floor(q*(v.length-1));
+    stops.push(v[idx]);
+  }
+  const colors = COLOR_RAMPS[key] || COLOR_RAMPS.default;
+  return {stops, colors};
+}
+
+function getLayerValues(key){
+  const vals=[]; for(const fips in META){ const v = META[fips]?.[key]; if(typeof v==="number") vals.push(v); }
+  return vals;
+}
+function getColorForValue(scale, val){
+  if(val==null || Number.isNaN(val)) return "#3a3f47";
+  const {stops, colors} = scale;
+  for(let i=0;i<stops.length-1;i++){ if(val <= stops[i+1]) return colors[i]; }
+  return colors[colors.length-1];
+}
+function updateLegend(scale, key){
+  const legend = document.getElementById("legend");
+  const labels = scale.stops.map(v => typeof v==="number" ? fmtBy(key,v) : v);
+  legend.innerHTML = `<div><b>${labelFor(key)}</b></div>` +
+    scale.colors.map((c,i)=>`
+      <div class="box"><span class="sw" style="background:${c}"></span> <span>${labels[i]}</span></div>
+    `).join("");
+}
+
+/* ----------------- Feature style & interactivity ----------------- */
+function styleForFeature(feat){
+  const fips = feat.properties.county_fips;
+  const rec = META[fips] || {};
+  const val = rec[currentLayerKey];
+  const col = getColorForValue(window.__CURRENT_SCALE, val);
+  let weight = SHOW_OUTLINES ? 0.8 : 0.2, color = "#5a7186", dashArray = null, fillOpacity = 0.9;
+  if(rec.conf_bucket==="low"){ if(SHOW_OUTLINES){ dashArray = "2,4"; color="#f2a900"; weight=1.2; } if(FADE_LOW){ fillOpacity=0.25; } }
+  return {color, weight, dashArray, fillColor:col, fillOpacity};
+}
+function tooltipHTML(fips){
+  const r = META[fips]||{}, l = currentLayerKey;
+  return `
+    <div style="min-width:240px">
+      <b>${r.NAME || fips}</b><br/>
+      <span class="muted">${labelFor("pred_tif")}:</span> ${fmtBy("pred_tif", r.pred_tif)}
+      ${r.conf_bucket ? ` <span class="badge ${badgeClass(r.conf_bucket)}">${r.conf_bucket}</span>` : ""}
+      <br/><span class="muted">${labelFor(l)}:</span> ${fmtBy(l, r[l])}
+      ${r.pred_tif_lo!=null? `<br/><span class="muted">PI:</span> ${fmtBy("pred_tif_lo",r.pred_tif_lo)} – ${fmtBy("pred_tif_hi",r.pred_tif_hi)}` : ""}
+    </div>`;
+}
+function onEachFeature(feat, layer){
+  const fips = feat.properties.county_fips;
+  featureIndex.set(fips, layer);
+  layer.on('mouseover', ()=> layer.setStyle({weight:1.4}));
+  layer.on('mouseout', ()=> layer.setStyle(styleForFeature(feat)));
+  layer.on('click', ()=> openDetail(fips));
+  layer.bindTooltip(()=>tooltipHTML(fips), {sticky:true, opacity:.95, direction:"top"});
+}
+function badgeClass(c){ if(c==="low") return "bad"; if(c==="wide"||c==="oor") return "warn"; if(c==="narrow") return "good"; return ""; }
+
+/* ----------------- Layer loading with fallback ----------------- */
+async function loadGeoJSON(url){
+  const res = await fetch(url);
+  if(!res.ok) throw new Error(`${url} ${res.status}`);
+  return res.json();
+}
+async function addAllStates(){
+  layersGroup.clearLayers(); featureIndex.clear();
+  // build scale for current layer
+  const values = getLayerValues(currentLayerKey);
+  window.__CURRENT_SCALE = makeQuantileScale(values, 6, currentLayerKey);
+  updateLegend(window.__CURRENT_SCALE, currentLayerKey);
+
+  let loaded = 0, errors = [];
+  if(MANIFEST && Array.isArray(MANIFEST.files) && MANIFEST.files.length){
+    for(const entry of MANIFEST.files){
+      const url = entry.path; // e.g., assets/geo/counties_1.geojson
+      try{
+        const gj = await loadGeoJSON(url);
+        const layer = L.geoJSON(gj, { style: styleForFeature, onEachFeature });
+        layersGroup.addLayer(layer); loaded++;
+      }catch(err){
+        console.error("Failed to load", url, err); errors.push(url);
+      }
+    }
+  }
+  // Fallback if nothing loaded
+  if(loaded === 0){
+    try{
+      const gj = await loadGeoJSON(NATIONAL_URL);
+      const layer = L.geoJSON(gj, { style: styleForFeature, onEachFeature });
+      layersGroup.addLayer(layer); loaded = 1;
+      uiNotice(`Loaded national fallback geometry. (Per-state files failed or were empty.)`);
+    }catch(err){
+      uiNotice(`❌ Could not load county geometry.<br/>Tried per-state files${errors.length? " (some failed)":""} and fallback: <code>${NATIONAL_URL}</code>.<br/>Open DevTools → Console for details.`);
+    }
+  }
+}
+
+/* ----------------- Detail panel ----------------- */
+function openDetail(fips){
+  const r = META[fips]; if(!r) return;
+  const el = document.getElementById("detail");
+  const card = (title, key) => `
+    <div class="card"><h4>${title}</h4><div class="big">${fmtBy(key, r[key])}</div></div>`;
+  el.innerHTML = `
+    <div class="pill">${r.NAME}</div>
+    <div style="margin:8px 0 6px">${r.profile_tag ? `<span class="badge">${r.profile_tag}</span>`:""}</div>
+
+    <div class="kpi">
+      <div class="card"><h4>${labelFor("pred_tif")}</h4><div class="big">${fmtBy("pred_tif", r.pred_tif)}</div><div class="muted">PI: ${fmtBy("pred_tif_lo", r.pred_tif_lo)} – ${fmtBy("pred_tif_hi", r.pred_tif_hi)}</div></div>
+      <div class="card"><h4>Confidence</h4><div>${r.conf_bucket ? `<span class="badge ${badgeClass(r.conf_bucket)}">${r.conf_bucket}</span>`:"N/A"}</div><div class="muted">PI width: ${fmtBy("y_pi_w", r.y_pi_w)}</div></div>
+
+      ${card(labelFor("alz_mean_rate"), "alz_mean_rate")}
+      ${card(labelFor("chd_pct"), "chd_pct")}
+      ${card(labelFor("diabetes_pct"), "diabetes_pct")}
+      ${card(labelFor("asthma_pct"), "asthma_pct")}
+
+      ${card(labelFor("socioecon_index"), "socioecon_index")}
+      ${card(labelFor("poverty_pct"), "poverty_pct")}
+      ${card(labelFor("unemp_rate_pct"), "unemp_rate_pct")}
+
+      ${card(labelFor("design_flow_mgd_sum"), "design_flow_mgd_sum")}
+      ${card(labelFor("treatment_score_mean"), "treatment_score_mean")}
+      ${card(labelFor("net_treated_pop_2022_sum"), "net_treated_pop_2022_sum")}
+      ${card(labelFor("dist_km"), "dist_km")}
+    </div>
+
+    <div class="footer">
+      <div>Compare to medians:
+        <span class="muted">State</span> ${compareLine(r.state, r)} ·
+        <span class="muted">U.S.</span> ${compareLine(null, r)}
+      </div>
+    </div>`;
+  const featLayer = featureIndex.get(fips);
+  if(featLayer){ try{ map.fitBounds(featLayer.getBounds(), {maxZoom:9, padding:[10,10]}); }catch(e){} }
+}
+function compareLine(state, r){
+  if(!STATS) return "N/A";
+  const bucket = state ? (STATS.by_state[state] || {}) : (STATS.national || {});
+  const keys = ["pred_tif","alz_mean_rate","chd_pct","diabetes_pct","asthma_pct"];
+  return keys.map(k=>{
+    const med = bucket[k]; if(med==null) return `${k}: n/a`;
+    const v = r[k]; const arrow = (v==null) ? "?" : (v>med ? "↑" : "↓");
+    return `${labelFor(k).replace(/\s*\(.*?\)/,'')} ${arrow}`;
+  }).join(" · ");
+}
+
+/* ----------------- Search with auto-suggest ----------------- */
+function setupSearch(){
+  const sb = document.getElementById("searchBox");
+  // build an index of {nameLower -> fips}
+  const IDX = Object.entries(META).map(([f,rec])=>({fips:f, name:(rec.NAME||"").toLowerCase()}));
+  // suggestion box
+  const box = document.createElement("div");
+  box.id = "suggestBox";
+  box.style.cssText = "position:relative";
+  sb.parentElement.style.position = "relative";
+  const list = document.createElement("div");
+  list.style.cssText = "position:absolute; top:36px; left:0; right:0; max-height:220px; overflow:auto; background:#0e1318; border:1px solid #263040; border-radius:8px; z-index:9999; display:none";
+  sb.parentElement.appendChild(list);
+
+  function render(q){
+    list.innerHTML = "";
+    if(!q){ list.style.display="none"; return; }
+    const m = q.toLowerCase();
+    const hits = IDX.filter(x=>x.name.includes(m)).slice(0,15);
+    if(!hits.length){ list.style.display="none"; return; }
+    hits.forEach(h=>{
+      const item = document.createElement("div");
+      item.textContent = META[h.fips].NAME;
+      item.style.cssText = "padding:6px 10px; cursor:pointer";
+      item.onmouseenter = ()=> item.style.background="#121a22";
+      item.onmouseleave = ()=> item.style.background="transparent";
+      item.onclick = ()=>{ sb.value = META[h.fips].NAME; list.style.display="none"; openDetail(h.fips); };
+      list.appendChild(item);
+    });
+    list.style.display="block";
+  }
+
+  sb.addEventListener("input", ()=> render(sb.value.trim()));
+  sb.addEventListener("blur", ()=> setTimeout(()=> list.style.display="none", 150));
+  sb.addEventListener("keydown",(e)=>{
+    if(e.key==="Enter"){
+      const q = sb.value.trim().toLowerCase();
+      if(META[q]){ openDetail(q); return; }
+      const hit = IDX.find(x=>x.name.includes(q));
+      if(hit) openDetail(hit.fips);
+      list.style.display="none";
+    }
+  });
+}
+
+/* ----------------- Layer & confidence toggles ----------------- */
+function setupLayerSelect(){
+  const sel = document.getElementById("layerSelect");
+  sel.value = currentLayerKey;
+  sel.addEventListener("change", async e=>{ currentLayerKey = e.target.value; await addAllStates(); });
+}
+function setupConfidenceToggles(){
+  const fade = document.getElementById("fadeLow");
+  const outlines = document.getElementById("showOutlines");
+  fade.addEventListener("change", async e=>{ FADE_LOW = e.target.checked; await addAllStates(); });
+  outlines.addEventListener("change", async e=>{ SHOW_OUTLINES = e.target.checked; await addAllStates(); });
+}
+
+/* ----------------- Bootstrap ----------------- */
+(async function(){
+  if(CITATIONS_URL){ const a = document.getElementById("citationsLink"); if(a){ a.href = CITATIONS_URL; a.textContent = "Full APA citations (QR)"; } }
+  initMap();
+  try{
+    [META, STATS, MANIFEST] = await Promise.all([
+      fetch(META_URL).then(r=>r.json()),
+      fetch(STATS_URL).then(r=>r.json()),
+      fetch(MANIFEST_URL).then(r=>r.json())
+    ]);
+  }catch(err){
+    uiNotice(`❌ Failed to load one of the core JSON files (meta/stats/manifest). Check folder paths. See Console.`);
+    console.error(err);
+    return;
+  }
+  setupSearch();
+  setupLayerSelect();
+  setupConfidenceToggles();
+  await addAllStates();
+})();
+</script>
+
+</body>
+</html>
